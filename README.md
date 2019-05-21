@@ -1,4 +1,4 @@
 # YLiao98.github.io
 CMSC320 Final Project
 
-Testing RStudio setup
+A simple data analysis on Ethereum written in R
