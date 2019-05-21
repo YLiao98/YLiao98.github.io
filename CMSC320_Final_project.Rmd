@@ -1,8 +1,10 @@
 ---
-title: "CMSC320 FInal Project"
+title: "Ethereum  Analysis"
 author: "Yiwei Liao"
-date: "5/14/2019"
-output: html_document
+date: "5/21/2019"
+output: 
+  html_document:
+    self_contained: no
 ---
 
 ```{r setup, include=FALSE}
@@ -10,3 +12,173 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
+##INTRODUCTION
+Even though the cryptocurrency faze has gone, cryptocurrency trading is still a hot topic. Especially Ethereum, one of the soundest projects in the whole cryptocurrency world. Ethereum is not just a platform but also a programming language (Turing complete) running on a blockchain, helping developers to build and publish distributed applications. 
+
+The purpose of this tutorial is to examine daily market value of cryptocurrency Ethereum and determine if we can form any predictions and correctly hypothesize based on the data.
+
+##GATHERING DATA
+The first step is downloading and importing the data that we will be analyzing. Download the dataset from the link:
+https://www.kaggle.com/jessevent/all-crypto-currencies
+
+##PREPARATION
+Libraries to install:
+tidyverse
+tidyr
+stringr
+broom
+lubridate
+ggplot2
+zoo
+
+#TIDYING THE DATA
+```{r crpto_df}
+library(tidyverse)
+library(stringr)
+all_crypto <- read_csv("crypto-markets.csv")
+all_crypto %>%
+  head()
+```
+```{r extract}
+ethereum_df <- all_crypto%>%
+  filter(name == "Ethereum")
+ethereum_df%>%head()
+```
+
+Now we gather all the historic data about Ethereum, we need to pick the needed columns to analyze.
+```{r tidy_df}
+ethereum_tidy<-ethereum_df%>%
+  select(name,date,open,close,high,low,market,volume)
+ethereum_tidy
+```
+By extracting the essential data, I found out that most of the data is tidy.
+
+#EXPLORATORY DATA ANALYSIS
+Now than our data is tidy, I plot the basic line based on daily close price in relation to date.
+```{r plot}
+ethereum_tidy %>%
+  ggplot()+
+  geom_line(aes(x=date,y=close))+
+  xlab("Days")+
+  ylab("close")+
+  ggtitle("Ethereum Daily Close Price From 2015 - 2018")
+```
+
+From the graph we obviously observe that at the end of 2017 to the start of 2018 is the year where Ethereum had its first huge price boost.  Our goal here is to analyze why this would happen and determine how important these factors are. 
+
+Let's look at decomposition of the date to see if any other trends occur. For this purpose, we'll be using decomposition method, see more details here:
+https://www.rdocumentation.org/packages/stats/versions/3.6.0/topics/decompose
+However, to do decomposition we must first go over a metric used in stock prediction called moving averages. Moving averages are averages calculated over a defined number of time periods for example in the code below we determine the moving averages(monthly)over the course of Ethereum’s trading history.
+More info about moving average:
+https://www.investopedia.com/terms/m/movingaverage.asp
+
+```{r moving}
+library(zoo)
+ethereum_tidy_2 <-ethereum_tidy %>%
+  #create a column for 30-day moving average
+  mutate(mov_avg = rollmean(ethereum_tidy$close,30,fill = NA, align = "right"))%>%
+  select(name,date,open,close,high,market,low,mov_avg,volume)
+
+```
+
+We know can compare moving average entries with basic data entries through line plot
+```{r moving compare,}
+ethereum_tidy_2 %>% ggplot(aes (x = date),color= factor() )+
+                    geom_line(aes(y=close),color = 'black') +
+                    geom_line(aes(y=mov_avg),color='blue') +
+                    xlab("date") +
+                    ylab("price in US dollars") +
+                    ggtitle("Moving Average Comparison")
+                   
+```
+As we can see from the graph, black line represents daily data and blue represent monthly data growth. Towards the end of 2017, black line is above the blue line which means the daily growth is much faster than the monthly growth. 
+
+```{r decomposition}
+#here we are generating a time series, for daily entries, our frequency here is 365.
+x <- ts(ethereum_tidy_2$mov_avg,start=c(2015,8),end=c(2018,5),frequency = 365)
+#use dcompose method and plot the graph
+de <- decompose(x)
+plot(de)
+```
+Observed from the decomposition graph, the trend is increasing over time. I also noticed the cyclic seasonality of the trend. But simply observe the trend over time isn't that useful when it comes to something as volatile as the price of cryptocurrency, We must also look at other factors. 
+
+The plot indicates that there may be a correlation between price and other factors out there, maybe the volume?
+```{r market}
+ethereum_tidy_2 %>% 
+              ggplot(aes(x=date,y=volume))+
+              geom_line() +
+              ##formatting to display correct labels
+              scale_y_continuous(labels = scales::comma)
+```
+Clearly from the graph, there is a similarity between the volume and the closing price.
+
+##LINEAR REGRESSION MODEL ANALYSIS
+To show whether there is a correlation betwen volume and closing price, we are going to build a linear regression model, which is a good method to test the correlation between two factors. 
+
+Null hypothesis: There is no correlation between volume and closing price 
+
+```{r linear regression}
+lr <- lm(close~volume,data =ethereum_tidy_2)
+broom::tidy(lr)
+```
+
+
+According to the data, there is an increase of price per year and there is an increase of about 4.629297e+01 in close price per volume trade increase. Because there is an increase of volume by 1.955865e-07 with respect of close price, p value is zero, thus we reject it.
+
+We would also like to fit a linear regression model for moving average with volume
+Null hypothesis: There is no correlation between volume and moving average
+```{r lr_m2}
+lr2 <- lm(mov_avg ~ volume,data=ethereum_tidy_2)
+broom::tidy(lr2)
+```
+
+From the outcome, there is an increase of about 5.913842e+01 in moving average per volume trade increase. Because there is an increase of volume by 1.800868e-07 with respect of moving average,and p value is 1.286342e-289, thus we reject it.
+
+More information about broom::tidy() and how to interpret the outcome:
+https://cran.r-project.org/web/packages/broom/vignettes/broom.html
+
+As we build two linear regression models, we would also like to see how well tow models fit the data. I decided to Use the anova function to perform an F-test that compares two models.
+
+More information about F-test and anova function can be found in these links:
+https://www.statmethods.net/stats/anova.html
+https://www.rdocumentation.org/packages/stats/versions/3.6.0/topics/anova
+
+```{r ftest}
+lr_f<-anova(lr)
+lr2_f<-anova(lr2)
+lr_f
+lr2_f
+```
+
+By looking at the table, because the residual sum in the mov_avg - volume model is smaller (1180), it indicates that it does a better job of fitting the estimate to the actual data then just using the close price data with the volume as a variable, where residual sum is larger (1209).
+
+```{r plot of linear model}
+ethereum_tidy_2 %>% 
+  ggplot(aes(x=volume,y=mov_avg)) +
+  geom_point() +
+  geom_smooth(method =lm) +
+  scale_colour_gradient(low = "black", high ="blue")+
+  scale_x_continuous(labels = scales::comma) +
+  ggtitle("moving average over volume")
+```
+
+By looking at the graph, it indicates that there is definitely a correlation between volume and moving average, also the blue fitted line has a nonzero slope, which in suggests that changes in the volume are associated with changes in the moving average. However, fitted line plots can only display the results from simple regression, which is one predictor variable and the response.
+```{r augment}
+summarized_lr2 <- lr2%>%summary()
+summarized_lr2
+```
+We must also check the p-value which is significantly less than the standard significance level at 0.05.
+
+Therefore, we can say there is a correlation between volumn and moving average.
+
+##CONCLUSION
+Overall, this document introduces the baisc concepts of data manipulation and performing hypothesis testing. I am able to determine the correlation between volume and the moving average. The increase in volume affected the moving average as there was a crazy rise in price of Ethereum starting at the second half of 2017. 
+
+##Reference
+Dataset:https://www.kaggle.com/jessevent/all-crypto-currencies
+Data decomposition: https://www.rdocumentation.org/packages/stats/versions/3.6.0/topics/decompose
+Moving average:https://www.investopedia.com/terms/m/movingaverage.asp
+Broom documentation: https://cran.r-project.org/web/packages/broom/vignettes/broom.html
+Anova: https://www.statmethods.net/stats/anova.html
+'anova' documentation:
+https://www.rdocumentation.org/packages/stats/versions/3.6.0/topics/anova
